@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Placar de Votação - Câmara Municipal{% endblock %}
+
+{% block content %}
+    <h1>Placar Eletrônico da Sessão</h1>
+
+    {% if projeto_ativo %}
+        <div id="painel-projeto" data-projeto-id="{{ projeto_ativo.id }}">
+            <h2><span id="proj-tipo">{{ projeto_ativo.get_tipo_display }}</span> N° {{ projeto_ativo.id }}: <span id="proj-titulo">{{ projeto_ativo.titulo }}</span></h2>
+            <p>Quórum Mínimo: <strong id="proj-quorum">{{ projeto_ativo.get_quorum_minimo_display }}</strong></p>
+            <p id="proj-descricao">{{ projeto_ativo.descricao|linebreaks }}</p>
+            <hr>
+
+            <div id="painel-status">
+                <h3 id="status-atual" style="color: red;">STATUS: {{ projeto_ativo.get_status_display }}</h3>
+                <h3 id="timer-display"></h3>
+            </div>
+            
+            <div id="placar-geral" style="margin-top: 20px;">
+                </div>
+
+            <div id="lista-votos">
+                <h4>Votos Computados (<span id="votos-contados">0</span> de {{ total_vereadores }} Vereadores)</h4>
+                <ul id="votos-individuais"></ul>
+            </div>
+        </div>
+    {% else %}
+        <p>Nenhum projeto em pauta ou votação no momento. Aguardando a Mesa Diretora.</p>
+    {% endif %}
+
+    <script>
+        const projetoId = document.getElementById('painel-projeto')?.dataset.projetoId;
+        let tempoRestante = 0;
+        let timerInterval;
+        let placarInterval;
+
+        function atualizarTimer() {
+            const timerDisplay = document.getElementById('timer-display');
+            if (tempoRestante > 0) {
+                timerDisplay.textContent = `Tempo Restante: ${tempoRestante} segundos`;
+                tempoRestante--;
+            } else if (timerInterval) {
+                timerDisplay.textContent = "TEMPO ESGOTADO. Aguardando Encerramento.";
+                clearInterval(timerInterval); // Para o timer
+            }
+        }
+
+        function carregarResultados() {
+            if (!projetoId) return;
+
+            const apiUrl = `/api/resultados/${projetoId}/`; 
+
+            fetch(apiUrl)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('status-atual').textContent = `STATUS: ${data.status}`;
+                    
+                    // 1. Atualiza Placar
+                    document.getElementById('placar-geral').innerHTML = `
+                        <p style="color: green; font-weight: bold;">SIM: ${data.sim}</p>
+                        <p style="color: red; font-weight: bold;">NÃO: ${data.nao}</p>
+                        <p style="color: blue;">ABSTENÇÃO: ${data.abstencao}</p>
+                    `;
+                    document.getElementById('votos-contados').textContent = data.votos_computados;
+
+                    // 2. Atualiza Votos Individuais
+                    const ul = document.getElementById('votos-individuais');
+                    ul.innerHTML = '';
+                    data.votos_individuais.forEach(voto => {
+                        const li = document.createElement('li');
+                        li.textContent = `${voto.vereador}: ${voto.escolha}`;
+                        ul.appendChild(li);
+                    });
+                    
+                    // 3. Gerencia o Timer (Somente se o projeto estiver ABERTO)
+                    if (data.status === 'ABERTO' && data.tempo_restante > 0) {
+                        if (!timerInterval) {
+                            tempoRestante = data.tempo_restante;
+                            timerInterval = setInterval(atualizarTimer, 1000); // Inicia o timer
+                        }
+                    } else if (timerInterval) {
+                        clearInterval(timerInterval);
+                        timerInterval = null;
+                        document.getElementById('timer-display').textContent = data.status === 'ABERTO' ? "TEMPO ESGOTADO" : "VOTAÇÃO ENCERRADA";
+                    }
+
+                    if (data.status === 'FECHADO') {
+                        clearInterval(placarInterval);
+                    }
+                })
+                .catch(error => console.error('Erro ao buscar resultados:', error));
+        }
+
+        if (projetoId) {
+            carregarResultados(); // Primeira carga
+            placarInterval = setInterval(carregarResultados, 3000); // Polling a cada 3 segundos
+        }
+    </script>
+{% endblock %}
